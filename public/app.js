@@ -80,7 +80,16 @@ async function fetchCode() {
         
         if (data.success) {
             latestCode = data.sent;
-            showResult('success', `Latest Netflix code found!`, latestCode);
+            let message = `Latest Netflix code found!`;
+            
+            // Add WhatsApp status to message
+            if (data.whatsappSent) {
+                message += ` ✅ Sent to WhatsApp`;
+            } else if (data.whatsappError) {
+                message += ` ⚠️ WhatsApp: ${data.whatsappError}`;
+            }
+            
+            showResult('success', message, latestCode);
         } else {
             showResult('error', data.error || 'No code found');
         }
@@ -91,6 +100,35 @@ async function fetchCode() {
         // Reset button state
         fetchBtn.innerHTML = '<span class="btn-icon">🔍</span>Get Latest Code';
         fetchBtn.disabled = false;
+    }
+}
+
+// Auto fetch and send code
+async function autoFetchAndSend() {
+    const autoBtn = document.getElementById('autoBtn');
+    const result = document.getElementById('result');
+    
+    // Show loading state
+    autoBtn.innerHTML = '<span class="loading"></span>Auto Fetching...';
+    autoBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/auto-fetch-and-send');
+        const data = await response.json();
+        
+        if (data.success) {
+            latestCode = data.code;
+            showResult('success', `Code found and sent to WhatsApp!`, latestCode);
+        } else {
+            showResult('error', data.error || 'Auto fetch failed');
+        }
+    } catch (error) {
+        console.error('Error auto fetching:', error);
+        showResult('error', 'Failed to auto fetch. Please try again.');
+    } finally {
+        // Reset button state
+        autoBtn.innerHTML = '<span class="btn-icon">🤖</span>Auto Fetch & Send';
+        autoBtn.disabled = false;
     }
 }
 

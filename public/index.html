@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netflix Code Bot</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Left Column - Main Functionality -->
+        <div class="left-column">
+            <div class="logo">🎬</div>
+            <h1>Netflix Code Bot</h1>
+            <p class="subtitle">Get the latest Netflix temporary access code</p>
+            
+            <div class="main-actions">
+                <button id="fetchBtn" class="btn primary" onclick="fetchCode()">
+                    <span class="btn-icon">🔍</span>
+                    Get Latest Code
+                </button>
+                
+                <div class="whatsapp-section">
+                    <h3>📱 Send to WhatsApp (Optional)</h3>
+                    <div id="whatsappStatus" class="whatsapp-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Checking connection...</span>
+                    </div>
+                    
+                    <button id="sendBtn" class="btn secondary" onclick="sendToWhatsApp()" disabled>
+                        <span class="btn-icon">📤</span>
+                        Send to WhatsApp
+                    </button>
+                </div>
+            </div>
+            
+            <div id="result" class="result"></div>
+        </div>
+        
+        <!-- Right Column - QR Code -->
+        <div class="right-column">
+            <div id="qrContainer" class="qr-container">
+                <h3>📱 WhatsApp Connection</h3>
+                <div id="whatsappStatusRight" class="whatsapp-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Checking connection...</span>
+                </div>
+                
+                <div id="qrCode" class="qr-code-display">
+                    <div class="qr-placeholder">
+                        <span class="qr-icon">📱</span>
+                        <p>Waiting for QR code...</p>
+                    </div>
+                </div>
+                
+                <div class="qr-instructions">
+                    <h4>How to connect:</h4>
+                    <ol>
+                        <li>Open WhatsApp on your phone</li>
+                        <li>Go to Settings → Linked Devices</li>
+                        <li>Tap "Link a Device"</li>
+                        <li>Scan the QR code above</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 

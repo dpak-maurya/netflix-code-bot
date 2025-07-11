@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: netflix-code-bot
+    env: node
+    buildCommand: npm install
+    startCommand: node main.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+    plan: free 

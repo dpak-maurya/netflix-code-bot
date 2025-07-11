@@ -109,24 +109,28 @@ class WhatsAppBot {
 
     // Listen for group message trigger
     this.client.on('message', async (msg) => {
+      // Debug: log all group messages
+      if (msg.from.endsWith('@g.us')) {
+        logger.info(`[Group Message] from: ${msg.from}, author: ${msg.author}, body: ${msg.body}`);
+      }
       try {
-        // Only respond to group messages in the configured group
-        if (msg.from !== config.whatsapp.recipientId) return;
-
-        // Check for trigger word (case-insensitive)
-        if (msg.body.trim().toLowerCase() === 'code') {
-          logger.info('Received "code" trigger in group, fetching code...');
-          // Fetch latest code
-          const email = await EmailService.getLatestMatchingEmail(24);
-          if (!email) {
-            await msg.reply('No matching Netflix email found.');
-            return;
-          }
-          const code = await EmailService.extractCode(email.content);
-          if (code) {
-            await msg.reply(`🤖 Netflix Code Bot:\n\n${code}`);
-          } else {
-            await msg.reply('No code or relevant link found in the latest email.');
+        // Only respond to messages in the configured group
+        if (msg.from === config.whatsapp.recipientId) {
+          // Check for trigger word (case-insensitive)
+          if (msg.body.trim().toLowerCase() === 'code') {
+            logger.info('Received "code" trigger in group, fetching code...');
+            // Fetch latest code
+            const email = await EmailService.getLatestMatchingEmail(24);
+            if (!email) {
+              await msg.reply('No matching Netflix email found.');
+              return;
+            }
+            const code = await EmailService.extractCode(email.content);
+            if (code) {
+              await msg.reply(`🤖 Netflix Code Bot:\n\n${code}`);
+            } else {
+              await msg.reply('No code or relevant link found in the latest email.');
+            }
           }
         }
       } catch (err) {
@@ -692,80 +696,8 @@ app.get('/list-groups', async (req, res) => {
   }
 });
 
-// === AUTO-SCHEDULER ===
-class AutoScheduler {
-  constructor() {
-    this.isRunning = false;
-    this.interval = null;
-    this.checkInterval = parseInt(process.env.AUTO_CHECK_INTERVAL) || 30; // minutes
-  }
-
-  async checkAndSendCode() {
-    if (this.isRunning) {
-      logger.info('Auto-check already running, skipping...');
-      return;
-    }
-
-    this.isRunning = true;
-    
-    try {
-      logger.info('Running automatic code check...');
-      
-      if (!whatsappBot.isReady) {
-        logger.warn('WhatsApp not ready, skipping auto-check');
-        return;
-      }
-
-      const email = await EmailService.getLatestMatchingEmail(2); // Check last 2 hours
-      if (!email) {
-        logger.info('No new emails found in auto-check');
-        return;
-      }
-
-      const code = await EmailService.extractCode(email.content);
-      if (!code) {
-        logger.info('No code found in latest email during auto-check');
-        return;
-      }
-
-      // Send to WhatsApp
-      const botMessage = `🤖 Netflix Code Bot (Auto):\n\n${code}`;
-      await whatsappBot.sendMessage(botMessage);
-      
-      logger.info('Code automatically sent via scheduler:', code);
-      
-    } catch (error) {
-      logger.error('Auto-scheduler error:', error.message);
-    } finally {
-      this.isRunning = false;
-    }
-  }
-
-  start() {
-    if (this.interval) {
-      clearInterval(this.interval);
-    }
-    
-    const intervalMs = this.checkInterval * 60 * 1000; // Convert minutes to milliseconds
-    this.interval = setInterval(() => {
-      this.checkAndSendCode();
-    }, intervalMs);
-    
-    logger.info(`Auto-scheduler started, checking every ${this.checkInterval} minutes`);
-  }
-
-  stop() {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-      logger.info('Auto-scheduler stopped');
-    }
-  }
-}
-
 // === INITIALIZATION ===
 const whatsappBot = new WhatsAppBot();
-const autoScheduler = new AutoScheduler();
 
 const server = app.listen(config.server.port, () => {
   logger.info(`Netflix Code Bot running on http://localhost:${config.server.port}`);
@@ -778,56 +710,13 @@ const server = app.listen(config.server.port, () => {
   whatsappBot.initialize();
   
   // Start auto-scheduler if enabled
-  if (process.env.AUTO_SCHEDULER_ENABLED === 'true') {
-    autoScheduler.start();
-  }
-});
-
-// Auto-scheduler control endpoints
-app.post('/scheduler/start', (req, res) => {
-  try {
-    autoScheduler.start();
-    res.json({ 
-      success: true, 
-      message: 'Auto-scheduler started',
-      checkInterval: autoScheduler.checkInterval
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to start scheduler' 
-    });
-  }
-});
-
-app.post('/scheduler/stop', (req, res) => {
-  try {
-    autoScheduler.stop();
-    res.json({ 
-      success: true, 
-      message: 'Auto-scheduler stopped' 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to stop scheduler' 
-    });
-  }
-});
-
-app.get('/scheduler/status', (req, res) => {
-  res.json({ 
-    success: true, 
-    isRunning: autoScheduler.interval !== null,
-    checkInterval: autoScheduler.checkInterval,
-    isRunning: autoScheduler.isRunning
-  });
+  // (Removed: No more auto-scheduler logic)
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM, shutting down gracefully...');
-  autoScheduler.stop();
+  // (Removed: No more auto-scheduler logic)
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -836,7 +725,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   logger.info('Received SIGINT, shutting down gracefully...');
-  autoScheduler.stop();
+  // (Removed: No more auto-scheduler logic)
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);

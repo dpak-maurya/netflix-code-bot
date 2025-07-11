@@ -30,9 +30,6 @@ railway variables set EMAIL_SUBJECT_FILTER=temporary access,verification
 # WhatsApp Configuration
 railway variables set WHATSAPP_RECIPIENT_ID=1234567890@c.us
 
-# Auto-Scheduler (Optional)
-railway variables set AUTO_SCHEDULER_ENABLED=true
-railway variables set AUTO_CHECK_INTERVAL=30
 
 # Netflix Auth (Optional)
 railway variables set NETFLIX_EMAIL=your-netflix-email@example.com
@@ -65,9 +62,6 @@ EMAIL_SUBJECT_FILTER=temporary access,verification
 # WhatsApp Configuration
 WHATSAPP_RECIPIENT_ID=1234567890@c.us
 
-# Auto-Scheduler Configuration (Optional)
-AUTO_SCHEDULER_ENABLED=false
-AUTO_CHECK_INTERVAL=30
 
 # Netflix Authentication (Optional)
 NETFLIX_EMAIL=your-netflix-email@example.com

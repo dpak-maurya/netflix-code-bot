@@ -109,10 +109,6 @@ class WhatsAppBot {
 
     // Listen for group message trigger
     this.client.on('message', async (msg) => {
-      // Debug: log all group messages
-      if (msg.from.endsWith('@g.us')) {
-        logger.info(`[Group Message] from: ${msg.from}, author: ${msg.author}, body: ${msg.body}`);
-      }
       try {
         // Only respond to messages in the configured group
         if (msg.from === config.whatsapp.recipientId) {
@@ -474,7 +470,6 @@ app.get('/whatsapp-status', (req, res) => {
 });
 
 app.get('/whatsapp-qr', (req, res) => {
-  logger.info('QR code requested, current QR code:', whatsappBot.qrCode ? 'Available' : 'Not available');
   if (whatsappBot.qrCode) {
     res.json({
       qrCode: whatsappBot.qrCode
@@ -591,118 +586,51 @@ app.post('/send-to-whatsapp', async (req, res) => {
   }
 });
 
-app.get('/auto-fetch-and-send', async (req, res) => {
-  try {
-    if (!config.whatsapp.recipientId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'WHATSAPP_RECIPIENT_ID not set in .env' 
-      });
-    }
+// app.get('/list-groups', async (req, res) => {
+//   try {
+//     if (!whatsappBot.isReady) {
+//       return res.status(503).json({ 
+//         success: false, 
+//         error: 'WhatsApp not ready.' 
+//       });
+//     }
 
-    if (!whatsappBot.isReady) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'WhatsApp not connected. Please scan the QR code first.' 
-      });
-    }
-
-    // Customizable lookback window
-    let lookbackHours = 24;
-    if (req.query.days) {
-      const days = parseFloat(req.query.days);
-      if (!isNaN(days) && days > 0) lookbackHours = days * 24;
-    } else if (req.query.hours) {
-      const hours = parseFloat(req.query.hours);
-      if (!isNaN(hours) && hours > 0) lookbackHours = hours;
-    }
-
-    logger.info('Starting automatic code fetch and send...');
-
-    const email = await EmailService.getLatestMatchingEmail(lookbackHours);
-    if (!email) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No matching email found.' 
-      });
-    }
-
-    const code = await EmailService.extractCode(email.content);
-    if (!code) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No code or relevant link found in the latest email.' 
-      });
-    }
+//     const chats = await whatsappBot.client.getChats();
+//     const groups = chats.filter(chat => chat.isGroup);
+//     const contacts = chats.filter(chat => !chat.isGroup);
     
-    // Send to WhatsApp automatically
-    const botMessage = `🤖 Netflix Code Bot:\n\n${code}`;
-    await whatsappBot.sendMessage(botMessage);
+//     logger.info('WhatsApp groups and contacts listed');
     
-    logger.info('Code automatically fetched and sent to WhatsApp:', code);
+//     return res.json({ 
+//       success: true, 
+//       groups: groups.map(group => ({
+//         name: group.name,
+//         id: group.id._serialized,
+//         participants: group.participants.length
+//       })),
+//       contacts: contacts.map(contact => ({
+//         name: contact.name || contact.pushname || 'Unknown',
+//         id: contact.id._serialized,
+//         number: contact.number
+//       }))
+//     });
     
-    return res.json({ 
-      success: true, 
-      message: 'Code found and sent to WhatsApp!', 
-      code: code,
-      emailSubject: email.subject,
-      emailDate: email.date
-    });
-    
-  } catch (err) {
-    logger.error('Auto-fetch-and-send Error:', err);
-    return res.status(500).json({ 
-      success: false, 
-      error: 'Failed to fetch and send code.' 
-    });
-  }
-});
-
-app.get('/list-groups', async (req, res) => {
-  try {
-    if (!whatsappBot.isReady) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'WhatsApp not ready.' 
-      });
-    }
-
-    const chats = await whatsappBot.client.getChats();
-    const groups = chats.filter(chat => chat.isGroup);
-    const contacts = chats.filter(chat => !chat.isGroup);
-    
-    logger.info('WhatsApp groups and contacts listed');
-    
-    return res.json({ 
-      success: true, 
-      groups: groups.map(group => ({
-        name: group.name,
-        id: group.id._serialized,
-        participants: group.participants.length
-      })),
-      contacts: contacts.map(contact => ({
-        name: contact.name || contact.pushname || 'Unknown',
-        id: contact.id._serialized,
-        number: contact.number
-      }))
-    });
-    
-  } catch (err) {
-    logger.error('Error listing groups:', err);
-    return res.status(500).json({ 
-      success: false, 
-      error: 'Failed to list groups' 
-    });
-  }
-});
+//   } catch (err) {
+//     logger.error('Error listing groups:', err);
+//     return res.status(500).json({ 
+//       success: false, 
+//       error: 'Failed to list groups' 
+//     });
+//   }
+// });
 
 // === INITIALIZATION ===
 const whatsappBot = new WhatsAppBot();
 
 const server = app.listen(config.server.port, () => {
   logger.info(`Netflix Code Bot running on http://localhost:${config.server.port}`);
-  logger.info(`Email: ${config.email.user}`);
-  logger.info(`WhatsApp: ${config.whatsapp.recipientId}`);
+  logger.info('Email: [REDACTED]');
+  logger.info('WhatsApp: [REDACTED]');
   
   // Validate configuration
   validateConfig();

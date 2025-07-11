@@ -103,35 +103,6 @@ async function fetchCode() {
     }
 }
 
-// Auto fetch and send code
-async function autoFetchAndSend() {
-    const autoBtn = document.getElementById('autoBtn');
-    const result = document.getElementById('result');
-    
-    // Show loading state
-    autoBtn.innerHTML = '<span class="loading"></span>Auto Fetching...';
-    autoBtn.disabled = true;
-    
-    try {
-        const response = await fetch('/auto-fetch-and-send');
-        const data = await response.json();
-        
-        if (data.success) {
-            latestCode = data.code;
-            showResult('success', `Code found and sent to WhatsApp!`, latestCode);
-        } else {
-            showResult('error', data.error || 'Auto fetch failed');
-        }
-    } catch (error) {
-        console.error('Error auto fetching:', error);
-        showResult('error', 'Failed to auto fetch. Please try again.');
-    } finally {
-        // Reset button state
-        autoBtn.innerHTML = '<span class="btn-icon">🤖</span>Auto Fetch & Send';
-        autoBtn.disabled = false;
-    }
-}
-
 // Send code to WhatsApp
 async function sendToWhatsApp() {
     if (!latestCode) {
@@ -179,54 +150,57 @@ async function sendToWhatsApp() {
 
 // Load QR code automatically
 async function loadQRCode() {
+    // Only poll if not connected
+    if (whatsappReady) return;
     try {
         const response = await fetch('/whatsapp-qr');
         const qrCode = document.getElementById('qrCode');
-        
         if (response.status === 404) {
             const errorData = await response.json();
-            qrCode.innerHTML = `
-                <div class="qr-placeholder">
-                    <span class="qr-icon">⏳</span>
-                    <p>${errorData.error || 'Waiting for QR code...'}</p>
-                </div>
-            `;
-            // Retry after 5 seconds
-            setTimeout(loadQRCode, 5000);
+            // Only show QR code placeholder if not connected
+            if (!whatsappReady) {
+                qrCode.innerHTML = `
+                    <div class="qr-placeholder">
+                        <span class="qr-icon">⏳</span>
+                        <p>${errorData.error || 'Waiting for QR code...'}</p>
+                    </div>
+                `;
+                setTimeout(loadQRCode, 5000);
+            }
             return;
         }
-        
         const data = await response.json();
-        
         if (data.qrCode) {
             // Generate QR code
             const qr = qrcode(0, 'M');
             qr.addData(data.qrCode);
             qr.make();
-            
             qrCode.innerHTML = qr.createImgTag(5);
-            
-            // Start polling for connection status
             pollWhatsAppStatus();
         } else {
-            qrCode.innerHTML = `
-                <div class="qr-placeholder">
-                    <span class="qr-icon">❌</span>
-                    <p>No QR code data received</p>
-                </div>
-            `;
+            // Only show this if not connected
+            if (!whatsappReady) {
+                qrCode.innerHTML = `
+                    <div class="qr-placeholder">
+                        <span class="qr-icon">❌</span>
+                        <p>No QR code data received</p>
+                    </div>
+                `;
+            }
         }
     } catch (error) {
         console.error('Error getting QR code:', error);
         const qrCode = document.getElementById('qrCode');
-        qrCode.innerHTML = `
-            <div class="qr-placeholder">
-                <span class="qr-icon">❌</span>
-                <p>Failed to load QR code</p>
-            </div>
-        `;
-        // Retry after 5 seconds
-        setTimeout(loadQRCode, 5000);
+        // Only show this if not connected
+        if (!whatsappReady) {
+            qrCode.innerHTML = `
+                <div class="qr-placeholder">
+                    <span class="qr-icon">❌</span>
+                    <p>Failed to load QR code</p>
+                </div>
+            `;
+            setTimeout(loadQRCode, 5000);
+        }
     }
 }
 

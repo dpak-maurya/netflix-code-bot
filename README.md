@@ -15,14 +15,8 @@ npm install -g @railway/cli
 railway login
 railway init
 
-# Set environment variables
-railway variables set EMAIL_HOST=imap.gmail.com
-railway variables set EMAIL_PORT=993
-railway variables set EMAIL_USER=your-email@gmail.com
-railway variables set EMAIL_PASSWORD=your-app-password
-railway variables set EMAIL_SENDER_FILTER=netflix@netflix.com
-railway variables set EMAIL_SUBJECT_FILTER=temporary access,verification
-railway variables set WHATSAPP_RECIPIENT_ID=1234567890@c.us
+# Set environment variables (copy from env.example)
+railway variables import .env
 
 # Deploy
 railway up
@@ -31,16 +25,15 @@ railway up
 ### 3. Setup
 1. **Visit your Railway URL**
 2. **Scan WhatsApp QR code**
-3. **Test**: Click "Auto Fetch & Send"
+3. **Test**: Click "Get Latest Code" or type "code" in your WhatsApp group
 
 ## 🔧 Features
 
 - ✅ **Email Integration**: IMAP support for Gmail, Outlook, etc.
 - ✅ **Code Extraction**: Multiple methods (email content, verification links)
 - ✅ **WhatsApp Integration**: Automatic sending to groups/contacts
-- ✅ **Auto-Scheduler**: Check for new codes every X minutes
-- ✅ **Netflix Authentication**: Optional login for verification links
 - ✅ **Web Interface**: Easy-to-use dashboard
+- ✅ **Group Listening**: Type "code" in your WhatsApp group to get the latest code
 
 ## 📋 Requirements
 
@@ -65,47 +58,37 @@ EMAIL_SUBJECT_FILTER=temporary access,verification
 # WhatsApp Configuration
 WHATSAPP_RECIPIENT_ID=1234567890@c.us
 
-# Auto-Scheduler (Optional)
-AUTO_SCHEDULER_ENABLED=false
-AUTO_CHECK_INTERVAL=30
-
 # Netflix Auth (Optional)
 NETFLIX_EMAIL=your-netflix-email@example.com
 NETFLIX_PASSWORD=your-netflix-password
+
+# Server Configuration
+PORT=3000
+NODE_ENV=production
 ```
 
 ## 🎯 Usage
 
 ### Web Interface
 - **Get Latest Code**: Fetch and display code
-- **Auto Fetch & Send**: One-click fetch and send to WhatsApp
 - **Send to WhatsApp**: Manual send if code is already fetched
+
+### WhatsApp Group
+- **Type "code"** in your configured group to get the latest Netflix code as a reply from the bot
 
 ### API Endpoints
 ```bash
 # Fetch latest code
 GET /fetch-latest-code
 
-# Auto fetch and send
-GET /auto-fetch-and-send
+# Send code to WhatsApp
+POST /send-to-whatsapp
 
 # Check status
 GET /status
 
 # Health check
 GET /health
-```
-
-### Auto-Scheduler
-```bash
-# Start scheduler
-POST /scheduler/start
-
-# Stop scheduler
-POST /scheduler/stop
-
-# Check status
-GET /scheduler/status
 ```
 
 ## 🛠️ Local Development
@@ -122,13 +105,6 @@ cp env.example .env
 # Start development server
 npm run dev
 ```
-
-## 📊 Railway Pricing
-
-- **Free Tier**: 500 hours/month
-- **Your Usage**: ~720 hours/month (always-on)
-- **Cost**: $5/month for always-on service
-- **Alternative**: Free tier with manual restarts
 
 ## 🔍 Troubleshooting
 

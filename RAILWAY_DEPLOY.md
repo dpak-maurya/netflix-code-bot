@@ -78,6 +78,8 @@ PORT=3000
 NODE_ENV=production
 ```
 
+> **Note:** Puppeteer uses its own bundled Chromium on Railway. You do not need to set `PUPPETEER_EXECUTABLE_PATH` or `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD`.
+
 ## After Deployment
 
 1. **Visit your Railway URL**
@@ -105,7 +107,7 @@ railway up
 
 - **WhatsApp QR Code**: Scan the QR code on your Railway URL
 - **Email Issues**: Check your Gmail app password
-- **Puppeteer Issues**: Railway handles this automatically
+- **Puppeteer Issues**: No extra config needed on Railway
 - **Auto-Scheduler**: Enable with `AUTO_SCHEDULER_ENABLED=true`
 
 Happy deploying! 🎉 

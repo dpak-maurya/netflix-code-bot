@@ -106,6 +106,34 @@ class WhatsAppBot {
       this.isReady = true;
       logger.info('WhatsApp bot is ready');
     });
+
+    // Listen for group message trigger
+    this.client.on('message', async (msg) => {
+      try {
+        // Only respond to group messages in the configured group
+        if (msg.from !== config.whatsapp.recipientId) return;
+
+        // Check for trigger word (case-insensitive)
+        if (msg.body.trim().toLowerCase() === 'code') {
+          logger.info('Received "code" trigger in group, fetching code...');
+          // Fetch latest code
+          const email = await EmailService.getLatestMatchingEmail(24);
+          if (!email) {
+            await msg.reply('No matching Netflix email found.');
+            return;
+          }
+          const code = await EmailService.extractCode(email.content);
+          if (code) {
+            await msg.reply(`🤖 Netflix Code Bot:\n\n${code}`);
+          } else {
+            await msg.reply('No code or relevant link found in the latest email.');
+          }
+        }
+      } catch (err) {
+        logger.error('Error handling group code trigger:', err);
+        await msg.reply('Error fetching code.');
+      }
+    });
   }
 
   async sendMessage(text) {

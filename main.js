@@ -28,7 +28,7 @@ const config = {
     user: process.env.EMAIL_USER,
     password: process.env.EMAIL_PASSWORD,
     sender: process.env.EMAIL_SENDER_FILTER,
-    subjects: process.env.EMAIL_SUBJECT_FILTER 
+    subjects: process.env.EMAIL_SUBJECT_FILTER
       ? process.env.EMAIL_SUBJECT_FILTER.split(',').map(s => s.trim()).filter(Boolean)
       : []
   },
@@ -48,19 +48,19 @@ const config = {
 function validateConfig() {
   const required = [
     'EMAIL_USER',
-    'EMAIL_PASSWORD', 
+    'EMAIL_PASSWORD',
     'EMAIL_SENDER_FILTER',
     'WHATSAPP_RECIPIENT_ID'
   ];
-  
+
   const missing = required.filter(key => !process.env[key]);
-  
+
   if (missing.length > 0) {
     logger.error('Missing required environment variables:', missing.join(', '));
     logger.error('Please check your .env file');
     process.exit(1);
   }
-  
+
   logger.info('All required environment variables are set');
 }
 
@@ -79,7 +79,7 @@ class WhatsAppBot {
     this.client.on('qr', (qr) => {
       logger.info('QR code generated - scan with WhatsApp');
       qrcode.generate(qr, { small: true });
-      
+
       // Emit QR code to web UI
       this.qrCode = qr;
       this.emitQRToWeb();
@@ -121,7 +121,7 @@ class WhatsAppBot {
               await msg.reply('No matching Netflix email found.');
               return;
             }
-            const code = await EmailService.extractCode(email.content);
+            const code = await EmailService.extractCode(email.content, email.subject);
             if (code) {
               await msg.reply(`🤖 Netflix Code Bot:\n\n${code}`);
             } else {
@@ -169,7 +169,7 @@ class EmailService {
       imap.once('ready', () => {
         imap.openBox('INBOX', false, (err, box) => {
           if (err) return reject(err);
-          
+
           const sinceDate = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
           const searchCriteria = [
             ['FROM', config.email.sender],
@@ -199,17 +199,17 @@ class EmailService {
             // Get the latest email
             const latest = results[results.length - 1];
             const f = imap.fetch(latest, { bodies: '' });
-            
+
             f.on('message', (msg, seqno) => {
               msg.on('body', (stream, info) => {
                 simpleParser(stream, (err, parsed) => {
                   if (err) return reject(err);
-                  
+
                   const emailDate = new Date(parsed.date);
                   if ((Date.now() - emailDate.getTime()) > lookbackHours * 60 * 60 * 1000) {
                     return resolve(null);
                   }
-                  
+
                   resolve({
                     subject: parsed.subject,
                     from: parsed.from?.text,
@@ -219,7 +219,7 @@ class EmailService {
                 });
               });
             });
-            
+
             f.once('end', () => imap.end());
           });
         });
@@ -230,213 +230,63 @@ class EmailService {
     });
   }
 
-  static async extractCode(content) {
-    // First try to extract a code (4-8 digit number) from email content
+  static async extractCode(content, subject) {
+    // For 'Netflix: your sign-in code', always extract directly from email content
+    if (subject && subject.trim().toLowerCase() === 'netflix: your sign-in code') {
+      const codeMatch = content.match(/\b\d{4,8}\b/);
+      if (codeMatch) {
+        logger.info('Code found directly in email content (sign-in code):', codeMatch[0]);
+        return codeMatch[0];
+      }
+      return null;
+    }
+
+    // For 'Your Netflix temporary access code', use NetflixAuthHandler if link is present
+    if (subject && subject.trim().toLowerCase() === 'your netflix temporary access code') {
+      // Try to extract a relevant link
+      const urlRegex = /(https?:\/\/[^\s<>\"]+)/gi;
+      const matches = content.match(urlRegex);
+      const relevant = matches && matches.find(link =>
+        link.includes('/verify')
+      );
+      
+      if (relevant) {
+        logger.info('Found verification link for temporary access code:', relevant);
+        
+        // Use NetflixAuthHandler to extract code (requires login)
+        if (config.netflix.email && config.netflix.password) {
+          try {
+            const authHandler = new NetflixAuthHandler(config.netflix.email, config.netflix.password);
+            const authCode = await authHandler.extractCodeWithAuth(relevant);
+            
+            if (authCode) {
+              logger.info('Successfully extracted code with Netflix authentication:', authCode);
+              return authCode;
+            }
+          } catch (authError) {
+            logger.warn('Netflix authentication failed:', authError.message);
+          }
+        } else {
+          logger.warn('Netflix credentials not provided, cannot access verification page');
+        }
+        
+        return null;
+      } else {
+        // No link, fallback to regex
+        const codeMatch = content.match(/\b\d{4,8}\b/);
+        if (codeMatch) {
+          logger.info('Code found directly in email content (no link):', codeMatch[0]);
+          return codeMatch[0];
+        }
+        return null;
+      }
+    }
+
+    // Default: fallback to regex extraction
     const codeMatch = content.match(/\b\d{4,8}\b/);
     if (codeMatch) {
       logger.info('Code found directly in email content:', codeMatch[0]);
       return codeMatch[0];
-    }
-
-    // If no code found, try to extract a relevant link
-    const urlRegex = /(https?:\/\/[^\s<>"]+)/gi;
-    const matches = content.match(urlRegex);
-    if (!matches) return null;
-
-    // Filter for links that look like code/verify links
-    const relevant = matches.find(link =>
-      link.includes('/verify') ||
-      link.includes('/code')
-    );
-    
-    if (relevant) {
-      logger.info('Found verification link, opening with Puppeteer:', relevant);
-      try {
-        const browser = await puppeteer.launch({ 
-          headless: true, 
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
-        });
-        const page = await browser.newPage();
-        
-        // Set user agent to avoid detection
-        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        logger.info('Navigating to verification page...');
-        await page.goto(relevant, { waitUntil: 'networkidle2', timeout: 30000 });
-        
-        // Check if we need to login to Netflix
-        const isLoginRequired = await page.evaluate(() => {
-          // Check for login page indicators
-          return document.querySelector('input[name="userLoginId"]') !== null ||
-                 document.querySelector('input[name="password"]') !== null ||
-                 document.querySelector('[data-uia="login-form"]') !== null ||
-                 document.querySelector('.login-form') !== null ||
-                 document.title.includes('Sign In') ||
-                 document.title.includes('Login');
-        });
-        
-        if (isLoginRequired) {
-          logger.warn('Netflix login required. Cannot access verification page without authentication.');
-          
-          // Try to extract any visible information from the login page
-          const loginPageInfo = await page.evaluate(() => {
-            const text = document.body.innerText;
-            // Look for any codes or instructions on the login page
-            const codeMatch = text.match(/\b\d{4,8}\b/);
-            return codeMatch ? codeMatch[0] : null;
-          });
-          
-          if (loginPageInfo) {
-            logger.info('Found code on login page:', loginPageInfo);
-            await browser.close();
-            return loginPageInfo;
-          }
-          
-          // Try alternative approaches for Netflix verification
-          logger.info('Attempting alternative Netflix verification methods...');
-          
-          // Method 1: Try to extract token from URL and make API call
-          const urlParams = new URL(relevant).searchParams;
-          const nftoken = urlParams.get('nftoken');
-          const messageGuid = urlParams.get('messageGuid');
-          
-          if (nftoken && messageGuid) {
-            logger.info('Found Netflix token, attempting API verification...');
-            
-            try {
-              // Try to make a direct API call to Netflix verification endpoint
-              const response = await page.evaluate(async (token, guid) => {
-                const apiUrl = `https://www.netflix.com/api/shakti/verify?nftoken=${token}&messageGuid=${guid}`;
-                const response = await fetch(apiUrl, {
-                  method: 'GET',
-                  headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                  }
-                });
-                
-                if (response.ok) {
-                  const data = await response.json();
-                  return data;
-                }
-                return null;
-              }, nftoken, messageGuid);
-              
-              if (response && response.code) {
-                logger.info('Successfully extracted code via API:', response.code);
-                await browser.close();
-                return response.code;
-              }
-            } catch (apiError) {
-              logger.warn('API verification failed:', apiError.message);
-            }
-          }
-          
-          // Method 2: Try Netflix authentication if credentials are available
-          if (config.netflix.email && config.netflix.password) {
-            logger.info('Attempting Netflix authentication to access verification page...');
-            
-            try {
-              const authHandler = new NetflixAuthHandler(config.netflix.email, config.netflix.password);
-              const authCode = await authHandler.extractCodeWithAuth(relevant);
-              
-              if (authCode) {
-                logger.info('Successfully extracted code with Netflix authentication:', authCode);
-                return authCode;
-              }
-            } catch (authError) {
-              logger.warn('Netflix authentication failed:', authError.message);
-            }
-          }
-          
-          // Method 3: Try to extract from email content more thoroughly
-          logger.info('Falling back to enhanced email content extraction...');
-          await browser.close();
-          
-          // Enhanced regex patterns for Netflix codes
-          const enhancedPatterns = [
-            /\b\d{4,8}\b/g,  // Standard 4-8 digit codes
-            /\b[A-Z0-9]{4,8}\b/g,  // Alphanumeric codes
-            /\b[A-Z]{2,4}\d{2,4}\b/g,  // Mixed alphanumeric
-            /\b\d{3,4}[A-Z]{2,4}\b/g   // Numbers followed by letters
-          ];
-          
-          for (const pattern of enhancedPatterns) {
-            const matches = content.match(pattern);
-            if (matches && matches.length > 0) {
-              logger.info('Found code with enhanced pattern:', matches[0]);
-              return matches[0];
-            }
-          }
-          
-          return null;
-        }
-        
-        // Wait a bit for any dynamic content to load
-        await page.waitForTimeout(3000);
-        
-        // Try multiple selectors to find the code
-        const selectors = [
-          'div[data-code]',
-          '.code',
-          '.access-code',
-          '.temporary-code',
-          '[class*="code"]',
-          '[class*="access"]',
-          'h1', 'h2', 'h3', 'h4', 'h5', 'h6', // Headers might contain the code
-          'p', 'span', 'div' // General text elements
-        ];
-        
-        let extractedCode = null;
-        
-        for (const selector of selectors) {
-          try {
-            await page.waitForSelector(selector, { timeout: 5000 });
-            const elements = await page.$$(selector);
-            
-            for (const element of elements) {
-              const text = await page.evaluate(el => el.textContent, element);
-              // Look for 4-8 digit codes in the text
-              const codeMatch = text.match(/\b\d{4,8}\b/);
-              if (codeMatch) {
-                extractedCode = codeMatch[0];
-                logger.info(`Code found using selector "${selector}":`, extractedCode);
-                break;
-              }
-            }
-            
-            if (extractedCode) break;
-          } catch (err) {
-            // Continue to next selector if this one fails
-            continue;
-          }
-        }
-        
-        // If no code found with selectors, try to extract from page content
-        if (!extractedCode) {
-          const pageContent = await page.content();
-          const codeMatch = pageContent.match(/\b\d{4,8}\b/);
-          if (codeMatch) {
-            extractedCode = codeMatch[0];
-            logger.info('Code found in page content:', extractedCode);
-          }
-        }
-        
-        await browser.close();
-        
-        if (extractedCode) {
-          logger.info('Successfully extracted code from verification page:', extractedCode);
-          return extractedCode;
-        } else {
-          logger.warn('No code found on verification page');
-          return null;
-        }
-        
-      } catch (err) {
-        logger.error('Failed to extract code from verification page:', err);
-        return null;
-      }
     }
     
     return null;
@@ -445,7 +295,7 @@ class EmailService {
 
 // === API ROUTES ===
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
@@ -459,7 +309,7 @@ app.get('/status', (req, res) => {
     recipient: config.whatsapp.recipientId ? 'Configured' : 'Not configured',
     qrCode: whatsappBot.qrCode || null
   };
-  
+
   res.json(status);
 });
 
@@ -484,9 +334,9 @@ app.get('/whatsapp-qr', (req, res) => {
 app.get('/fetch-latest-code', async (req, res) => {
   try {
     if (!config.whatsapp.recipientId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'WHATSAPP_RECIPIENT_ID not set in .env' 
+      return res.status(400).json({
+        success: false,
+        error: 'WHATSAPP_RECIPIENT_ID not set in .env'
       });
     }
 
@@ -499,23 +349,25 @@ app.get('/fetch-latest-code', async (req, res) => {
       const hours = parseFloat(req.query.hours);
       if (!isNaN(hours) && hours > 0) lookbackHours = hours;
     }
+    // Enforce a maximum lookback of 24 hours
+    if (lookbackHours > 24) lookbackHours = 24;
 
     const email = await EmailService.getLatestMatchingEmail(lookbackHours);
     if (!email) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No matching email found.' 
+      return res.status(404).json({
+        success: false,
+        error: 'No matching email found.'
       });
     }
 
-    const code = await EmailService.extractCode(email.content);
+    const code = await EmailService.extractCode(email.content, email.subject);
     if (!code) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No code or relevant link found in the latest email.' 
+      return res.status(404).json({
+        success: false,
+        error: 'No code or relevant link found in the latest email.'
       });
     }
-    
+
     // Auto-send to WhatsApp if enabled and WhatsApp is ready
     let whatsappSent = false;
     let whatsappError = null;
@@ -563,25 +415,25 @@ app.post('/send-to-whatsapp', async (req, res) => {
     }
 
     if (!whatsappBot.isReady) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'WhatsApp not connected. Please scan the QR code above to connect.' 
+      return res.status(503).json({
+        success: false,
+        error: 'WhatsApp not connected. Please scan the QR code above to connect.'
       });
     }
 
     const botMessage = `🤖 Netflix Code Bot:\n\n${code}`;
     await whatsappBot.sendMessage(botMessage);
-    
-    return res.json({ 
-      success: true, 
-      message: 'Sent to WhatsApp!' 
+
+    return res.json({
+      success: true,
+      message: 'Sent to WhatsApp!'
     });
-    
+
   } catch (err) {
     logger.error('Send Error:', err);
-    return res.status(500).json({ 
-      success: false, 
-      error: 'Failed to send to WhatsApp.' 
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to send to WhatsApp.'
     });
   }
 });
@@ -589,20 +441,20 @@ app.post('/send-to-whatsapp', async (req, res) => {
 // app.get('/list-groups', async (req, res) => {
 //   try {
 //     if (!whatsappBot.isReady) {
-//       return res.status(503).json({ 
-//         success: false, 
-//         error: 'WhatsApp not ready.' 
+//       return res.status(503).json({
+//         success: false,
+//         error: 'WhatsApp not ready.'
 //       });
 //     }
 
 //     const chats = await whatsappBot.client.getChats();
 //     const groups = chats.filter(chat => chat.isGroup);
 //     const contacts = chats.filter(chat => !chat.isGroup);
-    
+
 //     logger.info('WhatsApp groups and contacts listed');
-    
-//     return res.json({ 
-//       success: true, 
+
+//     return res.json({
+//       success: true,
 //       groups: groups.map(group => ({
 //         name: group.name,
 //         id: group.id._serialized,
@@ -614,12 +466,12 @@ app.post('/send-to-whatsapp', async (req, res) => {
 //         number: contact.number
 //       }))
 //     });
-    
+
 //   } catch (err) {
 //     logger.error('Error listing groups:', err);
-//     return res.status(500).json({ 
-//       success: false, 
-//       error: 'Failed to list groups' 
+//     return res.status(500).json({
+//       success: false,
+//       error: 'Failed to list groups'
 //     });
 //   }
 // });
@@ -631,12 +483,12 @@ const server = app.listen(config.server.port, () => {
   logger.info(`Netflix Code Bot running on http://localhost:${config.server.port}`);
   logger.info('Email: [REDACTED]');
   logger.info('WhatsApp: [REDACTED]');
-  
+
   // Validate configuration
   validateConfig();
-  
+
   whatsappBot.initialize();
-  
+
   // Start auto-scheduler if enabled
   // (Removed: No more auto-scheduler logic)
 });

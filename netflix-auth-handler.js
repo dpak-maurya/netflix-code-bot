@@ -1,11 +1,14 @@
 const puppeteer = require('puppeteer');
 const logger = require('./logger');
+const fs = require('fs');
+const path = require('path');
 
 class NetflixAuthHandler {
   constructor(email, password) {
     this.email = email;
     this.password = password;
     this.isAuthenticated = false;
+    this.cookiesPath = path.join(__dirname, 'netflix-cookies.json');
   }
 
   async authenticate(page) {
@@ -40,6 +43,14 @@ class NetflixAuthHandler {
       if (isLoggedIn) {
         this.isAuthenticated = true;
         logger.info('Netflix authentication successful');
+        // Save cookies after successful login
+        const cookies = await this.saveCookies(page);
+        try {
+          fs.writeFileSync(this.cookiesPath, JSON.stringify(cookies, null, 2));
+          logger.info('Netflix cookies saved to file');
+        } catch (err) {
+          logger.warn('Failed to save Netflix cookies to file:', err.message);
+        }
         return true;
       } else {
         logger.error('Netflix authentication failed');
@@ -69,12 +80,44 @@ class NetflixAuthHandler {
       // Set user agent
       await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       
-      // Authenticate first
-      const authSuccess = await this.authenticate(page);
-      
-      if (!authSuccess) {
-        await browser.close();
-        return null;
+      // Try to load cookies if available
+      let cookiesLoaded = false;
+      if (fs.existsSync(this.cookiesPath)) {
+        try {
+          const cookies = JSON.parse(fs.readFileSync(this.cookiesPath, 'utf-8'));
+          await this.loadCookies(page, cookies);
+          cookiesLoaded = true;
+          logger.info('Loaded Netflix cookies from file');
+        } catch (err) {
+          logger.warn('Failed to load Netflix cookies from file:', err.message);
+        }
+      }
+      // Test if cookies are still valid by visiting Netflix home
+      let needLogin = true;
+      if (cookiesLoaded) {
+        try {
+          await page.goto('https://www.netflix.com/browse', { waitUntil: 'networkidle2', timeout: 30000 });
+          // If redirected to login, cookies are invalid
+          const isLoginPage = await page.evaluate(() => {
+            return document.querySelector('input[name="userLoginId"]') !== null;
+          });
+          if (!isLoginPage) {
+            logger.info('Netflix cookies are valid, skipping login');
+            needLogin = false;
+          } else {
+            logger.info('Netflix cookies expired, need to login again');
+          }
+        } catch (err) {
+          logger.warn('Error testing Netflix cookies:', err.message);
+        }
+      }
+      // If cookies are not valid, perform login
+      if (needLogin) {
+        const authSuccess = await this.authenticate(page);
+        if (!authSuccess) {
+          await browser.close();
+          return null;
+        }
       }
       
       // Now navigate to the verification URL
@@ -82,46 +125,32 @@ class NetflixAuthHandler {
       await page.goto(verificationUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       
       // Wait for page to load
-      await page.waitForTimeout(3000);
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
-      // Extract code from the authenticated page
-      const code = await page.evaluate(() => {
-        // Try multiple selectors for Netflix verification codes
-        const selectors = [
-          '.verification-code',
-          '.access-code',
-          '.temporary-code',
-          '[data-testid="verification-code"]',
-          '.code-display',
-          'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-          'p', 'span', 'div'
-        ];
-        
-        for (const selector of selectors) {
-          const elements = document.querySelectorAll(selector);
-          for (const element of elements) {
-            const text = element.textContent;
-            // Look for 4-8 digit codes
-            const codeMatch = text.match(/\b\d{4,8}\b/);
-            if (codeMatch) {
-              return codeMatch[0];
-            }
+      // Try to extract code only inside the travel-verification div
+      let extractedCode = null;
+      try {
+        await page.waitForSelector('div[data-uia="travel-verification"]', { timeout: 10000 });
+        const travelDiv = await page.$('div[data-uia="travel-verification"]');
+        if (travelDiv) {
+          const text = await page.evaluate(el => el.textContent, travelDiv);
+          const codeMatch = text.match(/\b\d{4,8}\b/);
+          if (codeMatch) {
+            extractedCode = codeMatch[0];
+            logger.info('Code found in travel-verification div:', extractedCode);
           }
         }
-        
-        // Fallback to page content
-        const pageText = document.body.innerText;
-        const codeMatch = pageText.match(/\b\d{4,8}\b/);
-        return codeMatch ? codeMatch[0] : null;
-      });
+      } catch (err) {
+        logger.warn('travel-verification div not found or code not present:', err.message);
+      }
       
       await browser.close();
       
-      if (code) {
-        logger.info('Successfully extracted code with authentication:', code);
-        return code;
+      if (extractedCode) {
+        logger.info('Successfully extracted code from travel-verification page:', extractedCode);
+        return extractedCode;
       } else {
-        logger.warn('No code found even with authentication');
+        logger.warn('No code found in travel-verification page');
         return null;
       }
       

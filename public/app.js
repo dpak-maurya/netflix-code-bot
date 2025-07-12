@@ -211,7 +211,12 @@ async function showQRCode() {
 
 // Poll WhatsApp connection status
 function pollWhatsAppStatus() {
+    let pollCount = 0;
+    const maxPolls = 30; // 1 minute max (30 * 2 seconds)
+    
     const interval = setInterval(async () => {
+        pollCount++;
+        
         try {
             const response = await fetch('/status');
             const data = await response.json();
@@ -225,16 +230,18 @@ function pollWhatsAppStatus() {
                 if (latestCode) {
                     sendToWhatsApp();
                 }
+            } else if (pollCount >= maxPolls) {
+                // Stop polling after max attempts
+                clearInterval(interval);
+                console.log('Stopped polling - max attempts reached');
             }
         } catch (error) {
             console.error('Error polling WhatsApp status:', error);
+            if (pollCount >= maxPolls) {
+                clearInterval(interval);
+            }
         }
     }, 2000); // Check every 2 seconds
-    
-    // Stop polling after 5 minutes
-    setTimeout(() => {
-        clearInterval(interval);
-    }, 300000);
 }
 
 // Show result message

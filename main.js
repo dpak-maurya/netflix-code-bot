@@ -78,11 +78,10 @@ class WhatsAppBot {
   setupEventListeners() {
     this.client.on('qr', (qr) => {
       logger.info('QR code generated - scan with WhatsApp');
-      qrcode.generate(qr, { small: true });
+      // qrcode.generate(qr, { small: true }); // Removed to reduce log load
 
-      // Emit QR code to web UI
+      // Store QR code for web UI
       this.qrCode = qr;
-      this.emitQRToWeb();
     });
 
     this.client.on('loading_screen', (percent, message) => {
@@ -141,11 +140,6 @@ class WhatsAppBot {
       throw new Error('WhatsApp not ready');
     }
     await this.client.sendMessage(config.whatsapp.recipientId, text);
-  }
-
-  emitQRToWeb() {
-    // Clear any previous QR code when new one is generated
-    this.qrCode = this.qrCode;
   }
 
   initialize() {
@@ -320,6 +314,11 @@ app.get('/whatsapp-status', (req, res) => {
 });
 
 app.get('/whatsapp-qr', (req, res) => {
+  // Add cache headers to reduce unnecessary requests
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  
   if (whatsappBot.qrCode) {
     res.json({
       qrCode: whatsappBot.qrCode

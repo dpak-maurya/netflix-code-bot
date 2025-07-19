@@ -79,7 +79,7 @@ async function fetchCode() {
         const data = await response.json();
         
         if (data.success) {
-            latestCode = data.sent;
+            latestCode = data.code;
             let message = `Latest Netflix code found!`;
             
             // Add WhatsApp status to message

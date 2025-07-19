@@ -21,6 +21,7 @@ app.get('/', (req, res) => {
 });
 
 // === CONFIGURATION ===
+const LOOKBACK_MINUTES = 15;
 const config = {
   email: {
     host: process.env.EMAIL_HOST || 'imap.gmail.com',
@@ -37,7 +38,9 @@ const config = {
     password: process.env.NETFLIX_PASSWORD
   },
   whatsapp: {
-    recipientId: process.env.WHATSAPP_RECIPIENT_ID
+    recipientIds: process.env.WHATSAPP_RECIPIENT_ID
+      ? process.env.WHATSAPP_RECIPIENT_ID.split(',').map(id => id.trim()).filter(Boolean)
+      : []
   },
   server: {
     port: process.env.PORT || 3000
@@ -60,8 +63,15 @@ function validateConfig() {
     logger.error('Please check your .env file');
     process.exit(1);
   }
-
+  if (!config.whatsapp.recipientIds.length) {
+    logger.error('No WhatsApp recipient IDs configured.');
+    process.exit(1);
+  }
   logger.info('All required environment variables are set');
+}
+
+function isEmailRecent(emailDate) {
+  return (Date.now() - new Date(emailDate).getTime()) <= LOOKBACK_MINUTES * 60 * 1000;
 }
 
 // === WHATSAPP CLIENT ===
@@ -72,6 +82,7 @@ class WhatsAppBot {
       puppeteer: { headless: true, args: ['--no-sandbox'] }
     });
     this.isReady = false;
+    this.qrCode = null;
     this.setupEventListeners();
   }
 
@@ -79,8 +90,6 @@ class WhatsAppBot {
     this.client.on('qr', (qr) => {
       logger.info('QR code generated - scan with WhatsApp');
       // qrcode.generate(qr, { small: true }); // Removed to reduce log load
-
-      // Store QR code for web UI
       this.qrCode = qr;
     });
 
@@ -109,15 +118,14 @@ class WhatsAppBot {
     // Listen for group message trigger
     this.client.on('message', async (msg) => {
       try {
-        // Only respond to messages in the configured group
-        if (msg.from === config.whatsapp.recipientId) {
+        // Only respond to messages from configured recipients
+        if (config.whatsapp.recipientIds.includes(msg.from)) {
           // Check for trigger word (case-insensitive)
           if (msg.body.trim().toLowerCase() === 'code') {
-            logger.info('Received "code" trigger in group, fetching code...');
-            // Fetch latest code
-            const email = await EmailService.getLatestMatchingEmail(24);
+            logger.info('Received "code" trigger in chat, fetching code...');
+            const email = await EmailService.getLatestMatchingEmail();
             if (!email) {
-              await msg.reply('No matching Netflix email found.');
+              await msg.reply('No recent Netflix code found.');
               return;
             }
             const code = await EmailService.extractCode(email.content, email.subject);
@@ -135,11 +143,11 @@ class WhatsAppBot {
     });
   }
 
-  async sendMessage(text) {
+  async sendMessage(recipientId, text) {
     if (!this.isReady) {
       throw new Error('WhatsApp not ready');
     }
-    await this.client.sendMessage(config.whatsapp.recipientId, text);
+    await this.client.sendMessage(recipientId, text);
   }
 
   initialize() {
@@ -149,7 +157,8 @@ class WhatsAppBot {
 
 // === EMAIL SERVICE ===
 class EmailService {
-  static async getLatestMatchingEmail(lookbackHours = 24) {
+  // Always use a 15-minute lookback window
+  static async getLatestMatchingEmail() {
     return new Promise((resolve, reject) => {
       const imap = new Imap({
         user: config.email.user,
@@ -164,7 +173,7 @@ class EmailService {
         imap.openBox('INBOX', false, (err, box) => {
           if (err) return reject(err);
 
-          const sinceDate = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+          const sinceDate = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000);
           const searchCriteria = [
             ['FROM', config.email.sender],
             ['SINCE', sinceDate.toISOString().slice(0, 10)]
@@ -199,8 +208,7 @@ class EmailService {
                 simpleParser(stream, (err, parsed) => {
                   if (err) return reject(err);
 
-                  const emailDate = new Date(parsed.date);
-                  if ((Date.now() - emailDate.getTime()) > lookbackHours * 60 * 60 * 1000) {
+                  if (!isEmailRecent(parsed.date)) {
                     return resolve(null);
                   }
 
@@ -300,7 +308,7 @@ app.get('/health', (req, res) => {
 app.get('/status', (req, res) => {
   const status = {
     ready: whatsappBot.isReady,
-    recipient: config.whatsapp.recipientId ? 'Configured' : 'Not configured',
+    recipient: config.whatsapp.recipientIds.length > 0 ? 'Configured' : 'Not configured',
     qrCode: whatsappBot.qrCode || null
   };
 
@@ -332,33 +340,13 @@ app.get('/whatsapp-qr', (req, res) => {
 
 app.get('/fetch-latest-code', async (req, res) => {
   try {
-    if (!config.whatsapp.recipientId) {
-      return res.status(400).json({
-        success: false,
-        error: 'WHATSAPP_RECIPIENT_ID not set in .env'
-      });
-    }
-
-    // Customizable lookback window
-    let lookbackHours = 24;
-    if (req.query.days) {
-      const days = parseFloat(req.query.days);
-      if (!isNaN(days) && days > 0) lookbackHours = days * 24;
-    } else if (req.query.hours) {
-      const hours = parseFloat(req.query.hours);
-      if (!isNaN(hours) && hours > 0) lookbackHours = hours;
-    }
-    // Enforce a maximum lookback of 24 hours
-    if (lookbackHours > 24) lookbackHours = 24;
-
-    const email = await EmailService.getLatestMatchingEmail(lookbackHours);
+    const email = await EmailService.getLatestMatchingEmail();
     if (!email) {
       return res.status(404).json({
         success: false,
-        error: 'No matching email found.'
+        error: `No matching email found in the last ${LOOKBACK_MINUTES} minutes.`
       });
     }
-
     const code = await EmailService.extractCode(email.content, email.subject);
     if (!code) {
       return res.status(404).json({
@@ -366,34 +354,11 @@ app.get('/fetch-latest-code', async (req, res) => {
         error: 'No code or relevant link found in the latest email.'
       });
     }
-
-    // Auto-send to WhatsApp if enabled and WhatsApp is ready
-    let whatsappSent = false;
-    let whatsappError = null;
-    
-    if (req.query.autoSend !== 'false' && whatsappBot.isReady) {
-      try {
-        const botMessage = `🤖 Netflix Code Bot:\n\n${code}`;
-        await whatsappBot.sendMessage(botMessage);
-        whatsappSent = true;
-        logger.info('Code automatically sent to WhatsApp:', code);
-      } catch (whatsappErr) {
-        whatsappError = whatsappErr.message;
-        logger.error('Failed to auto-send to WhatsApp:', whatsappErr.message);
-      }
-    } else if (!whatsappBot.isReady) {
-      whatsappError = 'WhatsApp not connected';
-      logger.warn('WhatsApp not ready for auto-send');
-    }
-    
-    return res.json({ 
-      success: true, 
-      message: 'Code found!', 
-      sent: code,
-      whatsappSent: whatsappSent,
-      whatsappError: whatsappError
+    return res.json({
+      success: true,
+      message: 'Code found!',
+      code: code
     });
-    
   } catch (err) {
     logger.error('API Error:', err);
     return res.status(500).json({ 
@@ -405,6 +370,12 @@ app.get('/fetch-latest-code', async (req, res) => {
 
 app.post('/send-to-whatsapp', async (req, res) => {
   try {
+    if (!config.whatsapp.recipientIds.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'WHATSAPP_RECIPIENT_ID not configured'
+      });
+    }
     const { code } = req.body;
     if (!code) {
       return res.status(400).json({ 
@@ -412,22 +383,26 @@ app.post('/send-to-whatsapp', async (req, res) => {
         error: 'No code provided' 
       });
     }
-
+    // Only allow 4-8 digit numbers
+    if (!/^\d{4,8}$/.test(code)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid code format. Only 4 to 8 digit numbers are allowed.'
+      });
+    }
     if (!whatsappBot.isReady) {
       return res.status(503).json({
         success: false,
         error: 'WhatsApp not connected. Please scan the QR code above to connect.'
       });
     }
-
+    const defaultRecipient = config.whatsapp.recipientIds[0];
     const botMessage = `🤖 Netflix Code Bot:\n\n${code}`;
-    await whatsappBot.sendMessage(botMessage);
-
+    await whatsappBot.sendMessage(defaultRecipient, botMessage);
     return res.json({
       success: true,
       message: 'Sent to WhatsApp!'
     });
-
   } catch (err) {
     logger.error('Send Error:', err);
     return res.status(500).json({

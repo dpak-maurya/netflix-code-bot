@@ -7,7 +7,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const puppeteer = require('puppeteer');
 const logger = require('./logger');
-const NetflixAuthHandler = require('./netflix-auth-handler');
+const NetflixCodeExtractor = require('./netflix-code-extractor');
 
 const app = express();
 app.use(express.json());
@@ -258,7 +258,7 @@ class EmailService {
         // Use NetflixAuthHandler to extract code (requires login)
         if (config.netflix.email && config.netflix.password) {
           try {
-            const authHandler = new NetflixAuthHandler(config.netflix.email, config.netflix.password);
+            const authHandler = new NetflixCodeExtractor(config.netflix.email, config.netflix.password);
             const authCode = await authHandler.extractCodeWithAuth(relevant);
             
             if (authCode) {

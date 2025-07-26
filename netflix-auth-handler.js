@@ -125,32 +125,31 @@ class NetflixAuthHandler {
       await page.goto(verificationUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       
       // Wait for page to load
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Try to extract code only inside the travel-verification div
+      // Only extract code from the specific OTP element
       let extractedCode = null;
       try {
-        await page.waitForSelector('div[data-uia="travel-verification"]', { timeout: 10000 });
-        const travelDiv = await page.$('div[data-uia="travel-verification"]');
-        if (travelDiv) {
-          const text = await page.evaluate(el => el.textContent, travelDiv);
-          const codeMatch = text.match(/\b\d{4,8}\b/);
-          if (codeMatch) {
-            extractedCode = codeMatch[0];
-            logger.info('Code found in travel-verification div:', extractedCode);
+        await page.waitForSelector('div[data-uia="travel-verification-otp"].challenge-code', { timeout: 10000 });
+        const codeElement = await page.$('div[data-uia="travel-verification-otp"].challenge-code');
+        if (codeElement) {
+          const code = await page.evaluate(el => el.textContent.trim(), codeElement);
+          if (/^\d{4,8}$/.test(code)) {
+            extractedCode = code;
+            logger.info('Code found in travel-verification-otp element:', extractedCode);
           }
         }
       } catch (err) {
-        logger.warn('travel-verification div not found or code not present:', err.message);
+        logger.warn('travel-verification-otp element not found or code not present:', err.message);
       }
       
       await browser.close();
       
       if (extractedCode) {
-        logger.info('Successfully extracted code from travel-verification page:', extractedCode);
+        logger.info('Successfully extracted code from verification page:', extractedCode);
         return extractedCode;
       } else {
-        logger.warn('No code found in travel-verification page');
+        logger.warn('No code found in verification page');
         return null;
       }
       

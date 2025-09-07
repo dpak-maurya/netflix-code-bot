@@ -4,8 +4,7 @@ const path = require('path');
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const puppeteer = require('puppeteer');
+
 const logger = require('./logger');
 const NetflixCodeExtractor = require('./netflix-code-extractor');
 
